@@ -2,12 +2,17 @@ import cv2
 import numpy as np
 from collections import deque
 import movement
+import notify
 
-cv2.namedWindow("preview")
-vc = cv2.VideoCapture(1)
+mode_index = 0
+modes = ['Desktop', 'Application']
 
-vc.set(3, 160)
-vc.set(4, 120)
+notify.notify(modes[mode_index])
+
+vc = cv2.VideoCapture(0)
+
+vc.set(3, 120)
+vc.set(4, 160)
 
 width = vc.get(3)
 height = vc.get(4)
@@ -17,7 +22,10 @@ if vc.isOpened(): # try to get the first frame
 else:
     rval = False
 
-swipe_movement_buffer = deque(maxlen=15)
+swipe_movement_buffer = deque(maxlen=30)
+
+first_quarter = swipe_movement_buffer.maxlen//4
+third_quarter = 3 * first_quarter
 
 def get_roi(frame):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -37,6 +45,7 @@ def get_contours(grayscale, frame):
     ret, thresh = cv2.threshold(grayscale, 127, 255, 0)
     im2, contours, hierarchy = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     # print(len(contours))
+    if len(contours) == 0: return None
     c = max(contours, key = cv2.contourArea)
     area = cv2.contourArea(c)
     if  area > 1000:
@@ -50,9 +59,7 @@ def get_fingers(contour, frame):
     extTop = tuple(contour[contour[:, :, 1].argmin()][0])
     extBot = tuple(contour[contour[:, :, 1].argmax()][0])
 
-    # print(extLeft, extRight, extTop, extBot)
-
-    if abs(extBot[1]-height) < 20:
+    if abs(extBot[1]-height) < 50:
         cv2.drawContours(frame, [contour], -1, (0,255,0), 3)
         cv2.circle(frame, extLeft, 8, (0, 0, 255), -1)
         cv2.circle(frame, extRight, 8, (0, 255, 0), -1)
@@ -61,7 +68,6 @@ def get_fingers(contour, frame):
         swipe_movement_buffer.append(extTop)
     else:
         swipe_movement_buffer.clear()
-
 
 while rval:
     rval, frame = vc.read()
@@ -72,22 +78,37 @@ while rval:
         fingers = get_fingers(contour, frame)
 
     if len(swipe_movement_buffer) == swipe_movement_buffer.maxlen:
-        swipe_strength = swipe_movement_buffer[-1][0] - swipe_movement_buffer[0][0]
-        print(swipe_strength)
-        if abs(swipe_strength) > 100:
-            if swipe_strength < 0:
-                movement.go_to_left_desktop()
-            else:
-                movement.go_to_right_desktop()
+        swipe_strength_x = swipe_movement_buffer[-1][0] - swipe_movement_buffer[0][0]
+        swipe_strength_y = swipe_movement_buffer[-1][1] - swipe_movement_buffer[0][1]
+        change_mode_strength = swipe_movement_buffer[first_quarter][1] - swipe_movement_buffer[third_quarter][1]
+        # if (abs(change_mode_strength) > 100 and abs(swipe_strength) > 100):
+        #     if swipe_strength < 0:
+        #         mode_index = mode_index - 1 if mode_index > 0 else 0
+        #     else:
+        #         mode_index = mode_index + 1 if mode_index < len(modes) - 1  else len(modes) - 1
+        #     notify.notify(modes[mode_index])
+        #     swipe_movement_buffer.clear()
+        if abs(swipe_strength_x) > 200:
+            if (modes[mode_index] == 'Desktop'):
+                if swipe_strength_x < 0:
+                        movement.go_to_left_desktop()
+                else:
+                    movement.go_to_right_desktop()
+            elif (modes[mode_index] == 'Application'):
+                if swipe_strength_x < 0:
+                        movement.press_left()
+                else:
+                    movement.press_right()
+            swipe_movement_buffer.clear()
+        elif abs(swipe_strength_y) > 100:
+            if (modes[mode_index] == 'Desktop'):
+                pass
+            elif (modes[mode_index] == 'Application'):
+                if swipe_strength_y < 0:
+                        movement.scroll_down()
+                else:
+                    movement.scroll_up()
+            
             swipe_movement_buffer.clear()
 
-
-
-    # frame = get_contours(frame)
-    # cv2.imshow("preview", frame)
-    key = cv2.waitKey(20)
-    if key == 27: # exit on ESC
-        break
-
-cv2.destroyWindow("preview")
 vc.release()
